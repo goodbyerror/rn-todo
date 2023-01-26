@@ -1,0 +1,86 @@
+fastlane_version '2.53.1'
+
+project_name = ENV["REACT_NATIVE_PROJECT_NAME"]
+
+platform :ios do
+  desc 'Create app on App Store Connect'
+  lane :create do
+    app_name = prompt(text: "고객에게 보여줄 앱 이름을 입력하세요")
+    produce(
+      username: CredentialsManager::AppfileConfig.try_fetch_value(:apple_id),
+      app_identifier: CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier),
+      app_name: app_name,
+      language: "ko",
+      app_version: "1.0",
+    )
+  end
+
+  lane :deploy do
+    cert(
+      username: CredentialsManager::AppfileConfig.try_fetch_value(:apple_id),
+      team_id: CredentialsManager::AppfileConfig.try_fetch_value(:team_id),
+    )
+    sigh(
+      force: true,
+      team_id: CredentialsManager::AppfileConfig.try_fetch_value(:team_id),
+      app_identifier: CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier),
+      provisioning_name: "#{project_name} Profile",
+      filename: "#{project_name}.mobileprovision"
+    )
+
+    build_number = app_store_build_number rescue 0
+
+    increment_build_number(
+      build_number: build_number + 1,
+      xcodeproj: "ios/#{project_name}.xcodeproj"
+    )
+
+    increment_version_number(
+      bump_type: "major",
+      xcodeproj: "ios/#{project_name}.xcodeproj"
+    )
+
+    update_project_provisioning(
+      xcodeproj: "ios/#{project_name}.xcodeproj",
+      profile: "#{project_name}.mobileprovision",
+      code_signing_identity: "iPhone Distribution"
+    )
+
+    update_code_signing_settings(
+        code_sign_identity: "iPhone Distribution",
+        path: "ios/#{project_name}.xcodeproj"
+    )
+
+    build_app(
+      scheme: project_name,
+      configuration: "Release",
+      workspace: "ios/#{project_name}.xcworkspace",
+    )
+
+    deliver(
+      skip_metadata: true,
+      skip_screenshots: true,  
+    )
+  end
+end
+
+platform :android do
+  lane :build do
+    keystore
+
+    gradle(task: 'clean', project_dir: 'android/')
+    gradle(task: 'bundle', build_type: 'Release', project_dir: 'android/')
+
+    sh("open ../android/app/build/outputs/bundle/release")
+  end
+
+  lane :keystore do
+    app_identifier = CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier)
+    keystore_password = ENV['KEYSTORE_PASSWORD']
+
+    unless File.exist? '../android/app/keystores/release.keystore'
+      sh("mkdir -p ../android/app/keystores")
+      sh("keytool -genkey -v -storetype JKS -keyalg RSA -keysize 2048 -validity 10000 -storepass #{keystore_password} -keypass #{keystore_password} -alias #{app_identifier} -keystore ../android/app/keystores/release.keystore -dname \"CN=#{app_identifier},OU=,O=,L=,S=,C=KR\"")
+    end
+  end
+end
